@@ -6443,3 +6443,30 @@ SWITCH_ZEMISMART_TS0601_6GANG:
   info: Needs pinout. Secondary MCU. 6-gang!
   threads: https://github.com/romasku/tuya-zigbee-switch/issues/209
   store: https://www.zemismart.com/products/tb26-6
+SWITCH_UNSH_LW_US_4P:
+  human_name: UNSH LW-US-4P 4-gang <br> (touch panel, ZTU)
+  category: switch
+  power: mains
+  neutral: required
+  output: relay
+  device_type: router
+  stock_model_name: TS0004
+  stock_manufacturer_name: _TZ3000_ggl9xhem
+  stock_converter_manufacturer: Tuya
+  stock_converter_model: TS0004
+  override_z2m_device: null
+  tuya_module: ZTU
+  mcu_family: Telink
+  mcu: TLSR8258
+  config_str: ggl9xhem;TS0004-LW4P;SD3u;RC2;SD7u;RC3;SB6u;RD2;SD4u;RB4;
+  alt_config_str: null
+  old_manufacturer_names: null
+  old_zb_models: null
+  stock_manufacturer_id: 4417
+  stock_image_type: 54179
+  firmware_image_type: 47119
+  build: yes
+  status: in_progress
+  info: Pinout from continuity tests; gang order and touch-IC polarity unverified. B5 unmapped
+  threads: null
+  store: null
