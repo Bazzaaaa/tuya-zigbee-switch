@@ -419,8 +419,8 @@ const romasku = {
 };
 
 // Set to false once the pinout and button behaviour are confirmed.
-// true  = also show device_config, switch mode and switch action (for setup/testing)
-// false = only relay state, press action and decoupling dropdown per gang
+// true  = also show device_config, switch mode, switch action and power-on behaviour (setup/testing)
+// false = only relay state, press action, decoupling dropdown per gang, plus the two LED controls
 const SETUP_MODE = true;
 
 /********************************************************************
@@ -446,6 +446,10 @@ const definitions = [
                 romasku.pressAction(`switch_${n}_press_action`, `switch_${n}`),
                 romasku.relayMode(`switch_${n}_relay_mode`, `switch_${n}`),
             ]),
+            // LEDs: network LED on B5, shared blue backlight on C4 (wired as relay 1's indicator)
+            romasku.networkIndicator("network_led", "switch_0"),
+            romasku.relayIndicator("backlight", "relay_0"),
+            romasku.relayIndicatorMode("backlight_mode", "relay_0"),
             // Only while testing: pinout string and button behaviour settings
             ...(SETUP_MODE
                 ? [
@@ -528,6 +532,14 @@ const definitions = [
                 change: 1,
             });
 
+            await endpoint5.configureReporting("genOnOff", [
+                {
+                    attribute: {ID: 0xff02, type: 0x10}, // Boolean
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
 
 
         },

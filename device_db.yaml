@@ -6458,7 +6458,7 @@ SWITCH_UNSH_LW_US_4P:
   tuya_module: ZTU
   mcu_family: Telink
   mcu: TLSR8258
-  config_str: ggl9xhem;TS0004-LW4P;SD3u;RC2;SD7u;RC3;SB6u;RD2;SD4u;RB4;
+  config_str: ggl9xhem;TS0004-LW4P;SD3u;RC2;SD7u;RC3;SB6u;RD2;SD4u;RB4;LB5;IC4;
   alt_config_str: null
   old_manufacturer_names: null
   old_zb_models: null
@@ -6467,6 +6467,6 @@ SWITCH_UNSH_LW_US_4P:
   firmware_image_type: 47119
   build: yes
   status: in_progress
-  info: Pinout from continuity tests; gang order and touch-IC polarity unverified. B5 unmapped
+  info: Pinout from continuity tests; gang order and touch-IC polarity unverified. B5 = network LED, C4 = shared blue backlight (LED polarity unverified)
   threads: null
   store: null
