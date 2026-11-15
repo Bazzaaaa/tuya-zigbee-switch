@@ -1,0 +1,538 @@
+const {
+    numeric,
+    enumLookup,
+    deviceEndpoints,
+    onOff,
+    text,
+    binary,
+    windowCovering,
+} = require("zigbee-herdsman-converters/lib/modernExtend");
+const {assertString} = require("zigbee-herdsman-converters/lib/utils");
+const reporting = require("zigbee-herdsman-converters/lib/reporting");
+const constants = require("zigbee-herdsman-converters/lib/constants");
+const Zcl = require('zigbee-herdsman').Zcl;
+
+/********************************************************************
+  This file (`switch_custom.js`) is generated. 
+  
+  You can edit it for testing, but for PRs please use:
+  - `device_db.yaml`                - add or edit devices
+  - `switch_custom.md.jinja`        - update the template
+  - `make_z2m_custom_converters.py` - update generation script
+
+  Generate with: `make tools/update_converters`
+********************************************************************/
+
+const romasku = {
+    switchAction: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { on_off: 0, off_on: 1, toggle_simple: 2, toggle_smart_sync: 3, toggle_smart_opposite: 4 },
+            cluster: "genOnOffSwitchCfg",
+            attribute: {ID: 0x0010, type: 0x30, required: true, write: true, min: 0, max: 4}, // Enum8
+            description: `Select how switch should work:
+            - on_off: When switch physically moved to position 1 it always generates ON command, and when moved to position 2 it generates OFF command
+            - off_on: Same as on_off, but positions are swapped
+            - toggle_simple: Any press of physical switch will TOGGLE the relay and send TOGGLE command to binds
+            - toggle_smart_sync: Any press of physical switch will TOGGLE the relay and send corresponding ON/OFF command to keep binds in sync with relay
+            - toggle_smart_opposite: Any press of physical switch: TOGGLE the relay and send corresponding ON/OFF command to keep binds in the state opposite to the relay`,
+            entityCategory: "config",
+        }),
+    switchMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { toggle: 0, momentary: 1, momentary_nc: 2 },
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff00, type: 0x30 }, // Enum8
+            description: "Select the type of switch connected to the device",
+            entityCategory: "config",
+        }),
+    relayMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { detached: 0, press_start: 1, short_press: 3, long_press: 2},
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff01, type: 0x30 }, // Enum8
+            description: "When to turn on/off internal relay",
+            entityCategory: "config",
+        }),
+    relayIndex: (name, endpointName, relay_cnt) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: Object.fromEntries(
+                Array.from({ length: relay_cnt || 2 }, (_, i) => [`relay_${i + 1}`, i + 1])
+            ),
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff02, type: 0x20 }, // uint8
+            description: "Which internal relay it should trigger",
+            entityCategory: "config",
+        }),
+    bindedMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { press_start: 1, short_press: 3, long_press: 2},
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff05, type: 0x30 }, // Enum8
+            description: "When turn on/off binded device",
+            entityCategory: "config",
+        }),
+    longPressDuration: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff03, type: 0x21 }, // uint16
+            description: "What duration is considerd to be long press",
+            valueMin: 0,
+            valueMax: 5000,
+            entityCategory: "config",
+        }),
+    levelMoveRate: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "genOnOffSwitchCfg",
+            attribute: { ID: 0xff04, type: 0x20 }, // uint8
+            description: "Level (dim) move rate in steps per ms",
+            valueMin: 1,
+            valueMax: 255,
+            entityCategory: "config",
+        }),
+    pressAction: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            access: "STATE_GET",
+            lookup: { released: 0, press: 1, long_press: 2, position_on: 3, position_off: 4 },
+            cluster: "genMultistateInput",
+            attribute: "presentValue",
+            description: "Action of the switch: 'released' or 'press' or 'long_press'",
+            entityCategory: "diagnostic",
+        }),
+    relayIndicatorMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { same: 0, opposite: 1, manual: 2 },
+            cluster: "genOnOff",
+            attribute: { ID: 0xff01, type: 0x30 }, // Enum8
+            description: "Mode for the relay indicator LED",
+            entityCategory: "config",
+        }),
+    relayIndicator: (name, endpointName) =>
+        binary({
+            name,
+            endpointName,
+            valueOn: ["ON", 1],
+            valueOff: ["OFF", 0],
+            cluster: "genOnOff",
+            attribute: {ID: 0xff02, type: 0x10},  // Boolean
+            description: "State of the relay indicator LED",
+            access: "ALL",
+            entityCategory: "config",
+        }),
+    batteryPercentage: () => {
+        const result = numeric({
+            name: "battery",
+            cluster: "genPowerCfg",
+            attribute: "batteryPercentageRemaining",
+            description: "Remaining battery in %",
+            valueMin: 0,
+            valueMax: 100,
+            unit: "%",
+            access: "STATE_GET",
+            entityCategory: "diagnostic",
+        });
+        // Patch fromZigbee to convert ZCL 0-200 to 0-100%
+        const origConvert = result.fromZigbee[0].convert;
+        result.fromZigbee[0].convert = (model, msg, publish, options, meta) => {
+            const r = origConvert(model, msg, publish, options, meta);
+            if (r && r.battery !== undefined) {
+                r.battery = Math.round(r.battery / 2);
+            }
+            return r;
+        };
+        return result;
+    },
+    networkIndicator: (name, endpointName) =>
+        binary({
+            name,
+            endpointName,
+            valueOn: ["ON", 1],
+            valueOff: ["OFF", 0],
+            cluster: "genBasic",
+            attribute: {ID: 0xff01, type: 0x10},  // Boolean
+            description: "State of the network indicator LED",
+            access: "ALL",
+            entityCategory: "config",
+        }),
+    multiPressResetCount: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "genBasic",
+            attribute: { ID: 0xff02, type: 0x20 }, // uint8
+            description: "Number of consecutive presses to trigger factory reset (0 = disabled)",
+            valueMin: 0,
+            valueMax: 255,
+            entityCategory: "config",
+        }),
+    deviceConfig: (name, endpointName) =>
+        text({
+            name,
+            endpointName,
+            access: "ALL",
+            cluster: "genBasic",
+            attribute:  { ID: 0xff00, type: 0x44 }, // long str
+            description: "Current configuration of the device",
+            zigbeeCommandOptions: {timeout: 30_000},
+            validate: (value) => {
+                assertString(value);
+                
+                const validatePin = (pin) => {
+                    const validPins = [
+                        "A0", "A1", "A2", "A3", "A4", "A5", "A6","A7",
+                        "B0", "B1", "B2", "B3", "B4", "B5", "B6","B7",
+                        "C0", "C1", "C2", "C3", "C4", "C5", "C6","C7",
+                        "D0", "D1", "D2", "D3", "D4", "D5", "D6","D7",
+                    ];
+                    if (!validPins.includes(pin)) throw new Error(`Pin ${pin} is invalid`);
+                }
+
+                if (value.length > 256) throw new Error('Length of config is greater than 256');
+                if (!value.endsWith(';')) throw new Error('Should end with ;');
+                const parts = value.slice(0, -1).split(';');  // Drop last ;
+                if (parts.length < 2) throw new Error("Model and/or manufacturer missing");
+                for (const part of parts.slice(2)) {
+                    if (part == 'SLP') {
+                        continue;   
+                    } else if (part[0] == 'D') {
+                        if (!/^D\d+$/.test(part)) {
+                            throw new Error(`Debounce option ${part} is invalid. Use D<N>, e.g. D100 or D0`);
+                        }
+                    } else if (part.startsWith('BT')) {
+                        validatePin(part.slice(2,4));
+                    } else if (part[0] == 'B' || part[0] == 'S') {
+                        validatePin(part.slice(1,3));
+                        if (!["u", "U", "d", "f"].includes(part[3])) {
+                            throw new Error(`Pull up down ${part[3]} is invalid. Valid options are u, U, d, f`);
+                        } 
+                    } else if (part[0] == 'X') {
+                        validatePin(part.slice(1,3));
+                        validatePin(part.slice(3,5));
+                        if (!["u", "U", "d", "f"].includes(part[5])) {
+                            throw new Error(`Pull up down ${part[5]} is invalid. Valid options are u, U, d, f`);
+                        }
+                    } else if (part[0] == 'C') {
+                        validatePin(part.slice(1,3));
+                        validatePin(part.slice(3,5));
+                    } else if (part[0] == 'L' || part[0] == 'R' || part[0] == 'I') {
+                        validatePin(part.slice(1,3));
+                    } else if(part[0] == 'M') {
+                        ;
+                    } else if(part[0] == 'i') {
+                        ; // TODO: write validation
+                    } else {
+                        throw new Error(`Invalid entry ${part}. Should start with one of B, BT, C, D, I, L, M, R, S, SLP, X, i`);
+                    }
+                }
+            },
+            entityCategory: "config",
+        }),
+    coverSwitchPressAction: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            access: "STATE_GET",
+            lookup: { 
+                released: 0, 
+                open: 1, 
+                close: 2,
+                stop: 3,
+                long_open: 4,
+                long_close: 5
+            },
+            cluster: "genMultistateInput",
+            attribute: "presentValue",
+            description: "Cover switch button press action",
+            entityCategory: "diagnostic"
+        }),
+    coverSwitchType: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { toggle: 0, momentary: 1 },
+            cluster: 0xFC01,
+            attribute: {ID: 0x0000, type: Zcl.DataType.ENUM8},
+            description: "Type of cover switch: toggle (rocker) or momentary (push button)",
+            entityCategory: "config",
+        }),
+    coverSwitchCoverIndex: (name, endpointName, output_cnt) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: Object.fromEntries([
+                ['detached', 0],
+                ...Array.from({ length: output_cnt || 2 }, (_, i) => [`cover_${i + 1}`, i + 1])
+            ]),
+            cluster: 0xFC01,
+            attribute: {ID: 0x0001, type: Zcl.DataType.UINT8},
+            description: "Which cover to control locally (detached = no local control)",
+            entityCategory: "config",
+        }),
+    coverSwitchInvert: (name, endpointName) =>
+        binary({
+            name,
+            endpointName,
+            valueOn: ["ON", 1],
+            valueOff: ["OFF", 0],
+            cluster: 0xFC01,
+            attribute: {ID: 0x0002, type: Zcl.DataType.BOOLEAN},
+            description: "Inverts UP/DOWN direction for inputs",
+            access: "ALL",
+            entityCategory: "config",
+        }),
+    coverSwitchLocalMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { immediate: 0, short_press: 1, long_press: 2, hybrid: 3 },
+            cluster: 0xFC01,
+            attribute: {ID: 0x0003, type: Zcl.DataType.ENUM8},
+            description: "When to trigger local cover: immediate (start/stop on press), short_press (trigger on release), long_press (trigger after long press duration), hybrid (trigger on release or continuous movement while held). Only affects momentary switches",
+            entityCategory: "config",
+        }),
+    coverSwitchBindedMode: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            lookup: { immediate: 0, short_press: 1, long_press: 2, hybrid: 3 },
+            cluster: 0xFC01,
+            attribute: {ID: 0x0004, type: Zcl.DataType.ENUM8},
+            description: "When to send commands to bound devices: immediate (start/stop on press), short_press (trigger on release), long_press (trigger after long press duration), hybrid (trigger on release or continuous movement while held). Only affects momentary switches",
+            entityCategory: "config",
+        }),
+    coverSwitchLongPressDuration: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: 0xFC01,
+            attribute: {ID: 0x0005, type: Zcl.DataType.UINT16},
+            description: "Threshold in milliseconds to distinguish short press from long press",
+            valueMin: 0,
+            valueMax: 5000,
+            entityCategory: "config",
+        }),
+    coverMoving: (name, endpointName) =>
+        enumLookup({
+            name,
+            endpointName,
+            access: "STATE",
+            lookup: {
+                stopped: 0,
+                opening: 1,
+                closing: 2
+            },
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff00, type: Zcl.DataType.ENUM8},
+            description: "Cover movement status",
+            entityCategory: "diagnostic",
+        }),
+    coverMotorReversal: (name, endpointName) =>
+        binary({
+            name,
+            endpointName,
+            valueOn: [true, 1],
+            valueOff: [false, 0],
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff01, type: Zcl.DataType.BOOLEAN},
+            description: "Reverse motor direction (swap OPEN/CLOSE relays)",
+            entityCategory: "config",
+        }),
+    coverOpenTime: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff02, type: Zcl.DataType.UINT16},
+            description: "Travel time for the OPENING direction (0.1 s precision). " +
+                         "For symmetric covers you only need to set this value. " +
+                         "Set both open_time and close_time to 0 to enter manual mode: " +
+                         "position tracking is disabled, the motor runs until stopped or " +
+                         "until a 5-minute safety timeout, and position commands are ignored.",
+            valueMin: 0,
+            valueMax: 300,
+            valueStep: 0.1,
+            scale: 10,
+            unit: "s",
+            entityCategory: "config",
+        }),
+    coverCloseTime: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff03, type: Zcl.DataType.UINT16},
+            description: "Travel time for the CLOSING direction (0.1 s precision). " +
+                         "Set to 0 to use the same value as open_time. " +
+                         "Set explicitly only if closing speed differs from opening speed.",
+            valueMin: 0,
+            valueMax: 300,
+            valueStep: 0.1,
+            scale: 10,
+            unit: "s",
+            entityCategory: "config",
+        }),
+    coverOpenDeadzone: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff04, type: Zcl.DataType.UINT16},
+            description: "Mechanical deadzone at the OPEN end (100%) as a percentage of " +
+                         "total travel. Motor movement within this zone does not change the " +
+                         "reported position.",
+            valueMin: 0,
+            valueMax: 50,
+            unit: "%",
+            entityCategory: "config",
+        }),
+    coverClosedDeadzone: (name, endpointName) =>
+        numeric({
+            name,
+            endpointNames: [endpointName],
+            cluster: "closuresWindowCovering",
+            attribute: {ID: 0xff05, type: Zcl.DataType.UINT16},
+            description: "Mechanical deadzone at the CLOSED end (0%) as a percentage of " +
+                         "total travel. Motor movement within this zone does not change the " +
+                         "reported position.",
+            valueMin: 0,
+            valueMax: 50,
+            unit: "%",
+            entityCategory: "config",
+        }),
+};
+
+// Set to false once the pinout and button behaviour are confirmed.
+// true  = also show device_config, switch mode and switch action (for setup/testing)
+// false = only relay state, press action and decoupling dropdown per gang
+const SETUP_MODE = true;
+
+/********************************************************************
+  Trimmed converter for the UNSH LW-US-4P (TS0004-LW4P) only.
+  Derived from the generated switch_custom.js. Use this INSTEAD of
+  switch_custom.js (do not load both).
+********************************************************************/
+
+const definitions = [
+    {
+        zigbeeModel: [
+            "TS0004-LW4P",
+        ],
+        model: "TS0004",
+        vendor: "Tuya-custom",
+        description: "Custom switch (https://github.com/romasku/tuya-zigbee-switch)",
+        extend: [
+            deviceEndpoints({ endpoints: {"switch_0": 1, "switch_1": 2, "switch_2": 3, "switch_3": 4, "relay_0": 5, "relay_1": 6, "relay_2": 7, "relay_3": 8, } }),
+            // Relay state (on/off) for each gang
+            onOff({ powerOnBehavior: SETUP_MODE, endpointNames: ["relay_0", "relay_1", "relay_2", "relay_3"] }),
+            // Per gang: button press state/type + decoupling dropdown
+            ...[0, 1, 2, 3].flatMap((n) => [
+                romasku.pressAction(`switch_${n}_press_action`, `switch_${n}`),
+                romasku.relayMode(`switch_${n}_relay_mode`, `switch_${n}`),
+            ]),
+            // Only while testing: pinout string and button behaviour settings
+            ...(SETUP_MODE
+                ? [
+                    romasku.deviceConfig("device_config", "switch_0"),
+                    ...[0, 1, 2, 3].flatMap((n) => [
+                        romasku.switchMode(`switch_${n}_mode`, `switch_${n}`),
+                        romasku.switchAction(`switch_${n}_action_mode`, `switch_${n}`),
+                    ]),
+                ]
+                : []),
+        ],
+        meta: { multiEndpoint: true },
+        configure: async (device, coordinatorEndpoint, logger) => {
+            const endpoint1 = device.getEndpoint(1);
+            await reporting.bind(endpoint1, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint1.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint2 = device.getEndpoint(2);
+            await reporting.bind(endpoint2, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint2.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint3 = device.getEndpoint(3);
+            await reporting.bind(endpoint3, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint3.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint4 = device.getEndpoint(4);
+            await reporting.bind(endpoint4, coordinatorEndpoint, ["genMultistateInput"]);
+            // switch action:
+            await endpoint4.configureReporting("genMultistateInput", [
+                {
+                    attribute: {ID: 0x0055 /* presentValue */, type: 0x21}, // uint16
+                    minimumReportInterval: 0,
+                    maximumReportInterval: constants.repInterval.MAX,
+                    reportableChange: 1,
+                },
+            ]);
+            const endpoint5 = device.getEndpoint(5);
+            await reporting.onOff(endpoint5, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint6 = device.getEndpoint(6);
+            await reporting.onOff(endpoint6, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint7 = device.getEndpoint(7);
+            await reporting.onOff(endpoint7, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+            const endpoint8 = device.getEndpoint(8);
+            await reporting.onOff(endpoint8, {
+                min: 0,
+                max: constants.repInterval.MAX,
+                change: 1,
+            });
+
+
+
+        },
+        ota: true,
+    },
+];
+
+module.exports = definitions;
