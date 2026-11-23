@@ -207,7 +207,7 @@ void parse_config() {
             switch_clusters[switch_clusters_cnt].action =
                 ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE;
             switch_clusters[switch_clusters_cnt].relay_mode =
-                ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT;
+                ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DEFAULT;
             switch_clusters[switch_clusters_cnt].binded_mode =
                 ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT;
             switch_clusters[switch_clusters_cnt].relay_index     = switch_clusters_cnt + 1;
@@ -411,6 +411,10 @@ void network_indicator_on_network_status_change(
         update_relay_clusters();
     } else {
         network_indicator_not_connected(&network_indicator);
+        // Without a network nothing can drive the relays remotely, so make
+        // sure the buttons work normally. The controller sets the relay mode
+        // again once the device is back on the network.
+        switch_clusters_reset_relay_mode();
     }
 }
 

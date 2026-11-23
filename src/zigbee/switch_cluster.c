@@ -47,6 +47,15 @@ static void sync_switch_indicator_led(zigbee_switch_cluster *cluster) {
     led_off(cluster->indicator_led);
 }
 
+void switch_clusters_reset_relay_mode(void) {
+    for (int i = 0; i < switch_clusters_cnt; i++) {
+        switch_clusters[i].relay_mode = ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DEFAULT;
+    }
+    // Indicator LEDs are not touched here: while the network is down they
+    // show the "not connected" blink, and update_switch_clusters() resyncs
+    // them when the device joins again.
+}
+
 void update_switch_clusters() {
     for (int i = 0; i < switch_clusters_cnt; i++) {
         sync_switch_indicator_led(&switch_clusters[i]);
@@ -503,7 +512,10 @@ void switch_cluster_load_attrs_from_nv(zigbee_switch_cluster *cluster) {
     cluster->action      = nv_config_buffer.action;
     cluster->mode        = nv_config_buffer.mode;
     cluster->relay_index = nv_config_buffer.relay_index;
-    cluster->relay_mode  = nv_config_buffer.relay_mode;
+    // relay_mode is deliberately NOT restored from NV: after a reboot the
+    // button always controls the relay (ZCL_ONOFF_CONFIGURATION_RELAY_MODE_DEFAULT)
+    // until the controller sets another mode. The field stays in the NV
+    // struct so its layout does not change.
     cluster->button->long_press_duration_ms =
         nv_config_buffer.button_long_press_duration;
     cluster->level_move_rate = nv_config_buffer.level_move_rate;

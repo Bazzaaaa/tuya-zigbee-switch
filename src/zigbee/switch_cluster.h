@@ -41,4 +41,8 @@ void switch_cluster_callback_attr_write_trampoline(uint8_t endpoint,
 
 void update_switch_clusters(void);
 
+// Put every switch back to the default relay mode (button controls the relay).
+// Used when the network is lost. Does not write to NV.
+void switch_clusters_reset_relay_mode(void);
+
 #endif

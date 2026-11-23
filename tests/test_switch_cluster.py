@@ -17,6 +17,7 @@ from tests.zcl_consts import (
     ZCL_CLUSTER_MULTISTATE_INPUT_BASIC,
     ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
     ZCL_ONOFF_CONFIGURATION_BINDED_MODE_SHORT,
+    ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE,
     ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT,
     ZCL_ONOFF_CONFIGURATION_SWITCH_ACTION_TOGGLE_SIMPLE,
     ZCL_ONOFF_CONFIGURATION_SWITCH_TYPE_TOGGLE,
@@ -113,21 +114,20 @@ def test_switch_cluster_read_relay_index(device: Device, button_pins: list[str])
 
 
 def test_switch_cluster_attributes_preserved_via_nvm() -> None:
-    """Test that writable switch cluster attributes are preserved across device restarts via NVM"""
+    """Test that writable switch cluster attributes (except relay mode) are preserved across device restarts via NVM"""
     device_config = "A;B;SA0u;SA1u;RB0;RB1;"  # Two switches and two relays
     endpoint = 1
 
     test_values = {
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_ACTIONS: "2",
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_MODE: "1",
-        ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_MODE: "1",
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_INDEX: "2",
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LONG_PRESS_DUR: "900",
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_LEVEL_MOVE_RATE: "100",
         ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_BINDING_MODE: "1",
     }
 
-    # First session: write all test values
+    # First session: write all test values (relay mode too, it must NOT be kept)
     with StubProc(device_config=device_config) as proc:
         device = Device(proc)
 
@@ -135,9 +135,17 @@ def test_switch_cluster_attributes_preserved_via_nvm() -> None:
             device.write_zigbee_attr(
                 endpoint, ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG, attr_id, value
             )
+        device.zcl_switch_relay_mode_set(endpoint, ZCL_ONOFF_CONFIGURATION_RELAY_MODE_RISE)
     # Second session: restart device and verify values are preserved
     with StubProc(device_config=device_config) as proc:
         device = Device(proc)
+
+        # Relay mode is intentionally reset to the default on every boot
+        assert device.read_zigbee_attr(
+            endpoint,
+            ZCL_CLUSTER_ON_OFF_SWITCH_CONFIG,
+            ZCL_ATTR_ONOFF_CONFIGURATION_SWITCH_RELAY_MODE,
+        ) == str(ZCL_ONOFF_CONFIGURATION_RELAY_MODE_SHORT)
 
         for attr_id, expected_value in test_values.items():
             actual_value = device.read_zigbee_attr(
